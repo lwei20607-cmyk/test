@@ -6,25 +6,74 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Unzip and Find Project
+      - name: Unzip Project
+        shell: bash
         run: |
-          echo "Unzipping zip files..."
-          unzip -q "*.zip" -d ./project_extracted
-          ls -R ./project_extracted
+          set -e
 
-      - name: Build Xcode Project
+          mkdir -p project_extracted
+
+          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" -print -quit)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "❌ No zip file found in repository root"
+            exit 1
+          fi
+
+          echo "Found zip: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d project_extracted
+
+          echo "Project contents:"
+          find project_extracted -maxdepth 4 -type f | head -100
+
+      - name: Find Xcode Project
+        shell: bash
         run: |
-          cd ./project_extracted
-          # 自动寻找项目中的 .xcodeproj 文件
-          PROJECT_DIR=$(find . -name "*.xcodeproj" -maxdepth 3 | head -n 1)
-          echo "Found project directory: $PROJECT_DIR"
-          
-          # 获取 Scheme 名称
+          set -e
+
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/project_extracted" \
+            -maxdepth 6 \
+            -name "*.xcodeproj" \
+            -print -quit)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "❌ No .xcodeproj found"
+            exit 1
+          fi
+
+          echo "Found project: $PROJECT_DIR"
+
           PROJECT_NAME=$(basename "$PROJECT_DIR" .xcodeproj)
-          
-          # 尝试编译（使用模拟器 SDK 进行免签名测试编译）
-          xcodebuild -project "$PROJECT_DIR" -scheme "$PROJECT_NAME" -sdk iphonesimulator -configuration Release build
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "PROJECT_NAME=$PROJECT_NAME" >> "$GITHUB_ENV"
+
+      - name: Show Xcode Information
+        run: |
+          xcodebuild -version
+          echo "Project: $PROJECT_DIR"
+          echo "Project name: $PROJECT_NAME"
+          xcodebuild -project "$PROJECT_DIR" -list
+
+      - name: Build for iOS Simulator
+        shell: bash
+        run: |
+          set -o pipefail
+
+          xcodebuild \
+            -project "$PROJECT_DIR" \
+            -scheme "$PROJECT_NAME" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO \
+            clean build
