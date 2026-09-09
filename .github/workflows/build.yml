@@ -1,64 +1,4 @@
-name: Build iOS IPA
-
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Unzip Project
-        shell: bash
-        run: |
-          set -e
-
-          rm -rf "$GITHUB_WORKSPACE/project_extracted"
-          mkdir -p "$GITHUB_WORKSPACE/project_extracted"
-
-          ZIP_FILE=$(find "$GITHUB_WORKSPACE" \
-            -maxdepth 1 \
-            -type f \
-            -name "*.zip" \
-            -print -quit)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
-            exit 1
-          fi
-
-          echo "Found ZIP: $ZIP_FILE"
-
-          unzip -q "$ZIP_FILE" \
-            -d "$GITHUB_WORKSPACE/project_extracted"
-
-      - name: Find Xcode Project
-        shell: bash
-        run: |
-          set -e
-
-          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/project_extracted" \
-            -maxdepth 10 \
-            -name "*.xcodeproj" \
-            -print -quit)
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: No .xcodeproj found."
-            exit 1
-          fi
-
-          PROJECT_NAME=$(basename "$PROJECT_DIR" .xcodeproj)
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "PROJECT_NAME=$PROJECT_NAME" >> "$GITHUB_ENV"
-
-          echo "Project: $PROJECT_DIR"
-          echo "Scheme: $PROJECT_NAME"
-
-      - name: Build for Real Device
+- name: Build for Real Device (Ad-Hoc Sign)
         shell: bash
         run: |
           set +e
@@ -72,10 +12,9 @@ jobs:
             -scheme "$PROJECT_NAME" \
             -configuration Release \
             -sdk iphoneos \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGN_IDENTITY="-" \
             VALIDATE_PRODUCT=NO \
             CONFIGURATION_BUILD_DIR="$GITHUB_WORKSPACE/build" \
             clean build \
@@ -114,51 +53,3 @@ jobs:
           echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
 
           exit 0
-
-      - name: Package to IPA
-        shell: bash
-        run: |
-          set -e
-
-          echo "Packaging:"
-          echo "$APP_PATH"
-
-          rm -rf "$GITHUB_WORKSPACE/Payload"
-          mkdir -p "$GITHUB_WORKSPACE/Payload"
-
-          cp -R "$APP_PATH" \
-            "$GITHUB_WORKSPACE/Payload/"
-
-          cd "$GITHUB_WORKSPACE"
-
-          rm -f AttributionTestApp-unsigned.ipa
-
-          zip -qry \
-            AttributionTestApp-unsigned.ipa \
-            Payload
-
-          if [ ! -f AttributionTestApp-unsigned.ipa ]; then
-            echo "ERROR: IPA was not created."
-            exit 1
-          fi
-
-          echo ""
-          echo "=================================="
-          echo "IPA CREATED SUCCESSFULLY"
-          echo "=================================="
-          ls -lh AttributionTestApp-unsigned.ipa
-
-      - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AttributionTestApp-unsigned
-          path: AttributionTestApp-unsigned.ipa
-          if-no-files-found: error
-
-      - name: Upload Xcode Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: xcode-build-log
-          path: xcodebuild.log
-          if-no-files-found: ignore
