@@ -1,36 +1,76 @@
-# This is a basic workflow to help you get started with Actions
+name: Build iOS IPA
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Unzip Project
+        shell: bash
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          set -e
+          mkdir -p project_extracted
+          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" -print -quit)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "❌ No zip file found in repository root"
+            exit 1
+          fi
+          echo "Found zip: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d project_extracted
+
+      - name: Find Xcode Project
+        shell: bash
+        run: |
+          set -e
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/project_extracted" -maxdepth 6 -name "*.xcodeproj" -print -quit)
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "❌ No .xcodeproj found"
+            exit 1
+          fi
+          PROJECT_NAME=$(basename "$PROJECT_DIR" .xcodeproj)
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "PROJECT_NAME=$PROJECT_NAME" >> "$GITHUB_ENV"
+
+      - name: Build for Real Device (iOS)
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT_DIR" \
+            -scheme "$PROJECT_NAME" \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            clean build
+
+      - name: Package to IPA
+        shell: bash
+        run: |
+          cd $(dirname "$PROJECT_DIR")
+          mkdir -p Payload
+          
+          APP_PATH=$(find build/Release-iphoneos -name "*.app" -maxdepth 2 | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find . -name "*.app" -maxdepth 4 | head -n 1)
+          fi
+          
+          echo "Found app path: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
+          
+          zip -r AttributionTestApp.ipa Payload
+          echo "IPA packaged successfully!"
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AttributionTestApp-IPA
+          path: ./**/AttributionTestApp.ipa
