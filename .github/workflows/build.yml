@@ -1,0 +1,30 @@
+name: Build iOS App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Unzip and Find Project
+        run: |
+          echo "Unzipping zip files..."
+          unzip -q "*.zip" -d ./project_extracted
+          ls -R ./project_extracted
+
+      - name: Build Xcode Project
+        run: |
+          cd ./project_extracted
+          # 自动寻找项目中的 .xcodeproj 文件
+          PROJECT_DIR=$(find . -name "*.xcodeproj" -maxdepth 3 | head -n 1)
+          echo "Found project directory: $PROJECT_DIR"
+          
+          # 获取 Scheme 名称
+          PROJECT_NAME=$(basename "$PROJECT_DIR" .xcodeproj)
+          
+          # 尝试编译（使用模拟器 SDK 进行免签名测试编译）
+          xcodebuild -project "$PROJECT_DIR" -scheme "$PROJECT_NAME" -sdk iphonesimulator -configuration Release build
