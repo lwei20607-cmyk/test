@@ -1,4 +1,4 @@
-name: Build iOS App
+name: Build iOS IPA
 
 on:
   workflow_dispatch:
@@ -15,65 +15,62 @@ jobs:
         shell: bash
         run: |
           set -e
-
           mkdir -p project_extracted
-
           ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" -print -quit)
-
           if [ -z "$ZIP_FILE" ]; then
             echo "❌ No zip file found in repository root"
             exit 1
           fi
-
           echo "Found zip: $ZIP_FILE"
           unzip -q "$ZIP_FILE" -d project_extracted
-
-          echo "Project contents:"
-          find project_extracted -maxdepth 4 -type f | head -100
 
       - name: Find Xcode Project
         shell: bash
         run: |
           set -e
-
-          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/project_extracted" \
-            -maxdepth 6 \
-            -name "*.xcodeproj" \
-            -print -quit)
-
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/project_extracted" -maxdepth 6 -name "*.xcodeproj" -print -quit)
           if [ -z "$PROJECT_DIR" ]; then
             echo "❌ No .xcodeproj found"
             exit 1
           fi
-
-          echo "Found project: $PROJECT_DIR"
-
           PROJECT_NAME=$(basename "$PROJECT_DIR" .xcodeproj)
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "PROJECT_NAME=$PROJECT_NAME" >> "$GITHUB_ENV"
 
-      - name: Show Xcode Information
-        run: |
-          xcodebuild -version
-          echo "Project: $PROJECT_DIR"
-          echo "Project name: $PROJECT_NAME"
-          xcodebuild -project "$PROJECT_DIR" -list
-
-      - name: Build for iOS Simulator
+      - name: Build for Real Device (iOS)
         shell: bash
         run: |
           set -o pipefail
-
           xcodebuild \
             -project "$PROJECT_DIR" \
             -scheme "$PROJECT_NAME" \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -configuration Release \
+            -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            ONLY_ACTIVE_ARCH=NO \
             clean build
+
+      - name: Package to IPA
+        shell: bash
+        run: |
+          cd $(dirname "$PROJECT_DIR")
+          mkdir -p Payload
+          
+          APP_PATH=$(find build/Release-iphoneos -name "*.app" -maxdepth 2 | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find . -name "*.app" -maxdepth 4 | head -n 1)
+          fi
+          
+          echo "Found app path: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
+          
+          zip -r AttributionTestApp.ipa Payload
+          echo "IPA packaged successfully!"
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AttributionTestApp-IPA
+          path: ./**/AttributionTestApp.ipa
